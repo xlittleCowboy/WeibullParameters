@@ -2,6 +2,7 @@ import customtkinter
 from os import path
 from scipy.stats import weibull_min
 from scipy.stats import gamma
+from scipy.stats import norm
 import glob
 import pandas as pd
 import numpy as np
@@ -10,7 +11,7 @@ import sys
 
 font_size = 18
 
-frame_size_x = 450
+frame_size_x = 500
 frame_size_y = 200
 
 frame_border_width = 7.5
@@ -26,8 +27,8 @@ dist_for_params = ""
 customtkinter.set_appearance_mode("Dark")
 
 window = customtkinter.CTk()
-window.title("Оценка параметров распределения Вейбулла")
-window.geometry("1000x700")
+window.title("Оценка параметров")
+window.geometry("1050x700")
 window.resizable(False, False)
 
 MainFrame = customtkinter.CTkFrame(window)
@@ -96,7 +97,8 @@ column_cb.grid(sticky="w", row=2, column=1, padx=10, pady=20)
 filepath_lb = customtkinter.CTkLabel(fileFrame, text="Выберите Excel файл!", font=("CTkDefaultFont", font_size))
 filepath_lb.grid(row=1, column=2, padx=10, pady=10)
 
-distributions = {"Вейбулла трехпараметрическое" : "w3", "Вейбулла двухпараметрическое" : "w2", "Вейбулла экспоненциальное" : "we", "Гамма трехпараметрическое" : "g3", "Гамма двухпараметрическое" : "g2"}
+distributions = {"Вейбулла трехпараметрическое" : "w3", "Вейбулла двухпараметрическое" : "w2",
+ "Вейбулла экспоненциальное" : "we", "Гамма трехпараметрическое" : "g3", "Гамма двухпараметрическое" : "g2", "Нормальное распределение" : "n2"}
 distribution = customtkinter.StringVar(value="Вейбулла трехпараметрическое") 
 
 dist_cb = customtkinter.CTkComboBox(calculateFrame, variable=distribution, values=distributions.keys(), state="readonly", font=("CTkDefaultFont", font_size))
@@ -121,7 +123,7 @@ params_lb.grid(row=2, column=2, padx=10, pady=10)
 settings_lb = customtkinter.CTkLabel(settingsFrame, text='Количество знаков после запятой', font=("CTkDefaultFont", font_size))
 settings_lb.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
 
-scale_commas_lb = customtkinter.CTkLabel(settingsFrame, text='Для параметра масштаба (a): ', font=("CTkDefaultFont", font_size))
+scale_commas_lb = customtkinter.CTkLabel(settingsFrame, text='Для параметра масштаба/ст. откл. (a): ', font=("CTkDefaultFont", font_size))
 scale_commas_lb.grid(sticky="w", row=1, column=0, padx=(20, 0), pady=10)
 
 scale_commas_te = customtkinter.CTkEntry(settingsFrame, font=("CTkDefaultFont", font_size))
@@ -135,7 +137,7 @@ shape_commas_te = customtkinter.CTkEntry(settingsFrame, font=("CTkDefaultFont", 
 shape_commas_te.grid(sticky="w", row=2, column=1, padx=10, pady=10)
 shape_commas_te.insert(0, "6")
 
-loc_commas_lb = customtkinter.CTkLabel(settingsFrame, text='Для параметра сдвига (c): ', font=("CTkDefaultFont", font_size))
+loc_commas_lb = customtkinter.CTkLabel(settingsFrame, text='Для параметра сдвига/мат. ож. (c): ', font=("CTkDefaultFont", font_size))
 loc_commas_lb.grid(sticky="w", row=3, column=0, padx=(20, 0), pady=10)
 
 loc_commas_te = customtkinter.CTkEntry(settingsFrame, font=("CTkDefaultFont", font_size))
@@ -233,20 +235,28 @@ def calculate_params():
 		params = weibull_min.fit(data, method=methods[calcMethod.get()])
 	elif (dist_for_params == "g3" or dist_for_params == "g2"):
 		params = gamma.fit(data, method=methods[calcMethod.get()])
+	elif (dist_for_params == "n2"):
+		params = norm.fit(data, method=methods[calcMethod.get()])
 
 	shape = params[0]
 	loc = params[1]
-	scale = params[2]
 
 	if (dist_for_params == "we"):
-		params = weibull_min.fit(data, method=methods[calcMethod.get()])
 		shape = 1
 		loc = 0
 	if (dist_for_params == "w2" or dist_for_params == "g2"):
-		params = weibull_min.fit(data, method=methods[calcMethod.get()])
 		loc = 0
+	if (dist_for_params == "n2"):
+		loc = params[0]
+		scale = params[1]
+		shape = 0
+		# ...
 
-	params_lb.configure(text="Масштаб (a): " + str(round(scale, int(scale_commas_te.get()))) + "\n\nФорма (b): " + str(round(shape, int(shape_commas_te.get()))) + "\n\nСдвиг (c): " + str(round(loc, int(loc_commas_te.get()))))
+	if (dist_for_params != "n2"):
+		scale = params[2]
+		params_lb.configure(text="Масштаб (a): " + str(round(scale, int(scale_commas_te.get()))) + "\n\nФорма (b): " + str(round(shape, int(shape_commas_te.get()))) + "\n\nСдвиг (c): " + str(round(loc, int(loc_commas_te.get()))))
+	else:
+		params_lb.configure(text="Мат. ожидание: " + str(round(loc, int(loc_commas_te.get()))) + "\n\nСт. отклонение: " + str(round(scale, int(scale_commas_te.get()))))
 
 	paramsFrame.configure(border_color="green")
 
@@ -257,21 +267,40 @@ def show_plot():
 	fig, ax = plt.subplots(2)
 	ax[0].hist(data, density=True, bins='auto', histtype='stepfilled', alpha=0.2, label='Экспериментальные данные')
 
+	ppf_min = 0.000001
+	ppf_max = 0.999999
+
+	if (shape < 1):
+		ppf_min = 0.1
+		ppf_max = 0.9
+
 	if (dist_for_params == "w3" or dist_for_params == "we" or dist_for_params == "w2"):
-		x = np.linspace(weibull_min.ppf(0.0000001, shape, loc=loc, scale=scale), weibull_min.ppf(0.9999999, shape, loc=loc, scale=scale), 1000)
-		ax[0].plot(x, weibull_min.pdf(x, shape, loc=loc, scale=scale), lw=2, alpha=0.6, color='red', label='Функция плотности вероятности')
+		x = np.linspace(weibull_min.ppf(ppf_min, shape, loc=loc, scale=scale), weibull_min.ppf(ppf_max, shape, loc=loc, scale=scale), 100)
+		ax[0].set_xlim(x[0], x[-1])
+		ax[0].plot(x, weibull_min.pdf(x, shape, loc=loc, scale=scale), lw=2, alpha=0.6, color='red', label='Плотность вероятности')
 	elif (dist_for_params == "g3" or dist_for_params == "g2"):
-		x = np.linspace(gamma.ppf(0.0000001, shape, loc=loc, scale=scale), gamma.ppf(0.9999999, shape, loc=loc, scale=scale), 1000)
-		ax[0].plot(x, gamma.pdf(x, shape, loc=loc, scale=scale), lw=2, alpha=0.6, color='red', label='Функция плотности вероятности')
+		x = np.linspace(gamma.ppf(ppf_min, shape, loc=loc, scale=scale), gamma.ppf(ppf_max, shape, loc=loc, scale=scale), 100)
+		ax[0].set_xlim(x[0], x[-1])
+		ax[0].plot(x, gamma.pdf(x, shape, loc=loc, scale=scale), lw=2, alpha=0.6, color='red', label='Плотность вероятности')
+	elif (dist_for_params == "n2"):
+		x = np.linspace(norm.ppf(ppf_min, loc=loc, scale=scale), norm.ppf(ppf_max, loc=loc, scale=scale), 100)
+		ax[0].set_xlim(x[0], x[-1])
+		ax[0].plot(x, norm.pdf(x, loc=loc, scale=scale), lw=2, alpha=0.6, color='red', label='Плотность вероятности')
 	
 	ax[0].legend(loc='upper right', frameon=False, fontsize='large')
 
 	if (dist_for_params == "w3" or dist_for_params == "we" or dist_for_params == "w2"):
-		x = np.linspace(weibull_min.ppf(0.0000001, shape, loc=loc, scale=scale), weibull_min.ppf(0.9999999, shape, loc=loc, scale=scale), 1000)
-		ax[1].plot(x, weibull_min.cdf(x, shape, loc=loc, scale=scale), lw=2, alpha=0.6, color='green', label='Функция плотности распределения')
+		x = np.linspace(weibull_min.ppf(ppf_min, shape, loc=loc, scale=scale), weibull_min.ppf(ppf_max, shape, loc=loc, scale=scale), 100)
+		ax[1].set_xlim(x[0], x[-1])
+		ax[1].plot(x, weibull_min.cdf(x, shape, loc=loc, scale=scale), lw=2, alpha=0.6, color='green', label='Функция распределения')
 	elif (dist_for_params == "g3" or dist_for_params == "g2"):
-		x = np.linspace(gamma.ppf(0.0000001, shape, loc=loc, scale=scale), gamma.ppf(0.9999999, shape, loc=loc, scale=scale), 1000)
-		ax[1].plot(x, gamma.cdf(x, shape, loc=loc, scale=scale), lw=2, alpha=0.6, color='green', label='Функция плотности распределения')
+		x = np.linspace(gamma.ppf(ppf_min, shape, loc=loc, scale=scale), gamma.ppf(ppf_max, shape, loc=loc, scale=scale), 100)
+		ax[1].set_xlim(x[0], x[-1])
+		ax[1].plot(x, gamma.cdf(x, shape, loc=loc, scale=scale), lw=2, alpha=0.6, color='green', label='Функция распределения')
+	elif (dist_for_params == "n2"):
+		x = np.linspace(norm.ppf(ppf_min, loc=loc, scale=scale), norm.ppf(ppf_max, loc=loc, scale=scale), 100)
+		ax[1].set_xlim(x[0], x[-1])
+		ax[1].plot(x, norm.cdf(x, loc=loc, scale=scale), lw=2, alpha=0.6, color='green', label='Функция распределения')
 	
 	ax[1].legend(loc='lower right', frameon=False, fontsize='large')
 
@@ -307,11 +336,21 @@ def calculate_probability():
 	upper_edge = upper_edge_te.get()
 	lower_edge = lower_edge_te.get()
 
-	if (lower_edge == ""):
-		lower_edge = 0
+	if (upper_edge == "" or lower_edge == ""):
+		max_data = max(data)
+		min_data = min(data)
+		borders = 0
 
-	if (upper_edge == ""):
-		upper_edge = max(data) * 2
+		if (abs(min_data) > abs(max_data)):
+			borders = abs(min_data) * 2
+		else:
+			borders = abs(max_data) * 2
+
+		if (upper_edge == ""):
+			upper_edge = borders
+
+		if (lower_edge == ""):
+			lower_edge = -borders
 
 	if (dist_for_params == "w3" or dist_for_params == "we" or dist_for_params == "w2"):
 		lower_cdf = weibull_min.cdf(float(lower_edge), shape, loc, scale)
@@ -319,6 +358,9 @@ def calculate_probability():
 	elif (dist_for_params == "g3" or dist_for_params == "g2"):
 		lower_cdf = gamma.cdf(float(lower_edge), shape, loc, scale)
 		upper_cdf = gamma.cdf(float(upper_edge), shape, loc, scale)
+	elif (dist_for_params == "n2"):
+		lower_cdf = norm.cdf(float(lower_edge), loc, scale)
+		upper_cdf = norm.cdf(float(upper_edge), loc, scale)
 
 	probability_result_lb.configure(text="F(x) = " + str(round((upper_cdf - lower_cdf), 6))) 
 
